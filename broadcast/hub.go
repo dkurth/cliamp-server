@@ -25,6 +25,14 @@ type TrackInfo struct {
 	Album  string
 }
 
+// RecentTrack holds a track that was played and when it started.
+type RecentTrack struct {
+	TrackInfo
+	PlayedAt time.Time
+}
+
+const maxRecentTracks = 25
+
 // DisconnectHook is called after a listener is removed from the hub.
 // It receives the station ID and a snapshot of the disconnected listener.
 type DisconnectHook func(stationID string, snap ListenerSnapshot, disconnectedAt time.Time)
@@ -44,6 +52,9 @@ type Hub struct {
 	stationID     string
 	currentTrack  atomic.Value // stores TrackInfo
 	listenerCount atomic.Int64
+
+	recentTracksMu sync.Mutex
+	recentTracks   []RecentTrack // newest at end, capped at maxRecentTracks
 
 	// Stream properties (set from first frame)
 	Bitrate    int
@@ -136,6 +147,16 @@ func (h *Hub) Run(ctx context.Context) {
 // streamTrack plays a single prepared track into the ring buffer at real-time speed.
 func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 	slog.Info("now playing", "title", pt.track.Title, "artist", pt.track.Artist, "path", pt.track.Path)
+
+	// Push previous track to recent list before updating current
+	if prev := h.CurrentTrack(); prev.Title != "" || prev.Artist != "" || prev.Album != "" {
+		h.recentTracksMu.Lock()
+		h.recentTracks = append(h.recentTracks, RecentTrack{TrackInfo: prev, PlayedAt: time.Now()})
+		if len(h.recentTracks) > maxRecentTracks {
+			h.recentTracks = h.recentTracks[len(h.recentTracks)-maxRecentTracks:]
+		}
+		h.recentTracksMu.Unlock()
+	}
 
 	h.currentTrack.Store(TrackInfo{
 		Title:  pt.track.Title,
@@ -283,4 +304,18 @@ func (h *Hub) CurrentTrack() TrackInfo {
 // Ring returns the hub's ring buffer for listener reads.
 func (h *Hub) Ring() *RingBuffer {
 	return h.ring
+}
+
+// RecentTracks returns the last maxRecentTracks played, newest first.
+func (h *Hub) RecentTracks() []RecentTrack {
+	h.recentTracksMu.Lock()
+	defer h.recentTracksMu.Unlock()
+	if len(h.recentTracks) == 0 {
+		return nil
+	}
+	out := make([]RecentTrack, len(h.recentTracks))
+	for i, t := range h.recentTracks {
+		out[len(h.recentTracks)-1-i] = t
+	}
+	return out
 }

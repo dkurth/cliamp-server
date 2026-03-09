@@ -19,14 +19,22 @@ type Status struct {
 	StationName string
 }
 
+type recentTrackResponse struct {
+	Title    string `json:"title"`
+	Artist   string `json:"artist"`
+	Album    string `json:"album"`
+	PlayedAt string `json:"played_at"`
+}
+
 type statusResponse struct {
-	Station         string           `json:"station"`
-	Listeners       int              `json:"listeners"`
-	ListenerDetails []listenerDetail `json:"listener_details"`
-	CurrentTrack    currentTrack     `json:"current_track"`
-	Uptime          string           `json:"uptime"`
-	UptimeSeconds   int64            `json:"uptime_seconds"`
-	PlaylistLength  int              `json:"playlist_length"`
+	Station         string                 `json:"station"`
+	Listeners       int                    `json:"listeners"`
+	ListenerDetails []listenerDetail       `json:"listener_details"`
+	CurrentTrack    currentTrack           `json:"current_track"`
+	RecentTracks    []recentTrackResponse  `json:"recent_tracks"`
+	Uptime          string                 `json:"uptime"`
+	UptimeSeconds   int64                  `json:"uptime_seconds"`
+	PlaylistLength  int                    `json:"playlist_length"`
 }
 
 type currentTrack struct {
@@ -68,6 +76,7 @@ func (s *Status) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Artist: track.Artist,
 			Album:  track.Album,
 		},
+		RecentTracks:   buildRecentTracks(s.Hub.RecentTracks()),
 		Uptime:         formatDuration(uptime),
 		UptimeSeconds:  int64(uptime.Seconds()),
 		PlaylistLength: s.TrackCount,
@@ -99,11 +108,12 @@ type globalStatusResponse struct {
 }
 
 type stationStatus struct {
-	Name            string           `json:"name"`
-	Listeners       int              `json:"listeners"`
-	ListenerDetails []listenerDetail `json:"listener_details"`
-	CurrentTrack    currentTrack     `json:"current_track"`
-	PlaylistLength  int              `json:"playlist_length"`
+	Name            string                `json:"name"`
+	Listeners       int                   `json:"listeners"`
+	ListenerDetails []listenerDetail      `json:"listener_details"`
+	CurrentTrack    currentTrack          `json:"current_track"`
+	RecentTracks    []recentTrackResponse `json:"recent_tracks"`
+	PlaylistLength  int                   `json:"playlist_length"`
 }
 
 func (g *GlobalStatus) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +144,7 @@ func (g *GlobalStatus) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Artist: track.Artist,
 				Album:  track.Album,
 			},
+			RecentTracks:   buildRecentTracks(info.Hub.RecentTracks()),
 			PlaylistLength: info.TrackCount,
 		}
 	}
@@ -147,6 +158,19 @@ func (g *GlobalStatus) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func buildRecentTracks(tracks []broadcast.RecentTrack) []recentTrackResponse {
+	out := make([]recentTrackResponse, len(tracks))
+	for i, t := range tracks {
+		out[i] = recentTrackResponse{
+			Title:    t.Title,
+			Artist:   t.Artist,
+			Album:    t.Album,
+			PlayedAt: t.PlayedAt.UTC().Format(time.RFC3339),
+		}
+	}
+	return out
 }
 
 func buildListenerDetails(snaps []broadcast.ListenerSnapshot, now time.Time) []listenerDetail {
