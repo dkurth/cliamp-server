@@ -28,6 +28,7 @@ Flags:
   --name <name>             Station name
   --intro <path>            Intro MP3 file (played once at startup)
   --ads <path>              Ads directory or single MP3 file
+  --ignore-file <path>      File listing tracks never to play (re-read on change)
   --ad-every-songs <n>      Play ad after every N songs (default: 0 = off)
   --ad-every-minutes <n>    Play ad after every N minutes (default: 0 = off)
   --max-listeners <n>       Max concurrent listeners per station (0 = unlimited)
@@ -59,7 +60,7 @@ func ParseFlags(cfg *Config) (exit bool) {
 	args := os.Args[1:]
 
 	var musicPath, stationName string
-	var introPath, adsPath string
+	var introPath, adsPath, ignorePath string
 	var adEverySongs, adEveryMins int
 	shuffleSet := false
 	shuffle := true
@@ -113,6 +114,13 @@ func ParseFlags(cfg *Config) (exit bool) {
 				os.Exit(1)
 			}
 			introPath = args[i]
+		case "--ignore-file":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --ignore-file requires a path")
+				os.Exit(1)
+			}
+			ignorePath = args[i]
 		case "--ads":
 			i++
 			if i >= len(args) {
@@ -220,6 +228,9 @@ func ParseFlags(cfg *Config) (exit bool) {
 			}
 			if adsPath != "" {
 				st.AdsPath = adsPath
+			}
+			if ignorePath != "" {
+				st.IgnoreFile = ignorePath
 			}
 			if adEverySongs > 0 {
 				st.AdEveryNSongs = adEverySongs

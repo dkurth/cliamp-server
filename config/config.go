@@ -22,11 +22,15 @@ type StationConfig struct {
 	Shuffle     bool   `toml:"shuffle"`
 	Recursive   bool   `toml:"recursive"`
 
+	// IgnoreFile lists tracks never to play (see package ignore). Optional;
+	// a missing file means nothing is ignored. Re-read when it changes.
+	IgnoreFile string `toml:"ignore_file"`
+
 	// Intro: single MP3 played once at station startup
 	IntroFile string `toml:"intro_file"`
 
 	// Ads: MP3 files injected between songs
-	AdsPath      string `toml:"ads_path"`
+	AdsPath       string `toml:"ads_path"`
 	AdEveryNSongs int    `toml:"ad_every_n_songs"`
 	AdEveryNMins  int    `toml:"ad_every_n_minutes"`
 	AdShuffle     bool   `toml:"ad_shuffle"`

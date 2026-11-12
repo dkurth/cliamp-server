@@ -11,6 +11,7 @@ import (
 	"cliamp-server/broadcast"
 	"cliamp-server/config"
 	"cliamp-server/geo"
+	"cliamp-server/ignore"
 	"cliamp-server/library"
 	"cliamp-server/playlist"
 	"cliamp-server/scheduler"
@@ -101,10 +102,16 @@ func main() {
 
 		pl := playlist.New(tracks, stCfg.Shuffle)
 
-		var source playlist.TrackSource = pl
+		var music playlist.TrackSource = pl
+		if stCfg.IgnoreFile != "" {
+			music = ignore.NewFilter(pl, stCfg.Path, stCfg.IgnoreFile, pl.Len())
+			slog.Info("ignore file enabled", "station", id, "path", stCfg.IgnoreFile)
+		}
+
+		var source playlist.TrackSource = music
 
 		if stCfg.AdsPath != "" {
-			sched, err := scheduler.New(pl, scheduler.Config{
+			sched, err := scheduler.New(music, scheduler.Config{
 				AdsPath:      stCfg.AdsPath,
 				AdEverySongs: stCfg.AdEveryNSongs,
 				AdEveryMins:  stCfg.AdEveryNMins,

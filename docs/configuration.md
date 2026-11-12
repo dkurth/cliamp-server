@@ -17,6 +17,7 @@ There are two ways to configure cliamp-server: CLI flags for a quick single stat
 | `--name <name>` | Station name | "cliamp radio" |
 | `--intro <path>` | Intro MP3 played once when a listener connects | |
 | `--ads <path>` | Ads directory or single MP3 file | |
+| `--ignore-file <path>` | File listing tracks never to play (see below) | |
 | `--ad-every-songs <n>` | Insert an ad after every N songs | 0 (off) |
 | `--ad-every-minutes <n>` | Insert an ad after every N minutes | 0 (off) |
 | `--password <token>` | Admin password for /status endpoints | |
@@ -88,3 +89,22 @@ Every station supports these fields:
 | `ad_every_n_songs` | int | Play an ad after every N music tracks |
 | `ad_every_n_minutes` | int | Play an ad after every N minutes |
 | `ad_shuffle` | bool | Randomize ad selection order |
+| `ignore_file` | string | File listing tracks never to play (see below) |
+
+## Ignore File
+
+`ignore_file` (or `--ignore-file`) points at a plain-text file of tracks to skip.
+Rules are matched against each track's path relative to the station's `path`,
+with forward slashes. The file is re-read whenever it changes, so no restart is
+needed. A missing file ignores nothing.
+
+```
+# comments and blank lines are skipped
+Artist/Album/03 Song.mp3     exact path
+Some Artist/                 everything under a folder (trailing slash)
+*Live*                       glob on the file name (no slash in the rule)
+Other/*.wma                  glob on the full relative path
+```
+
+The track after the one currently being prepared is the first that can be
+affected by an edit, so a change takes effect within a track or two.

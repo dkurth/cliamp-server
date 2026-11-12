@@ -50,8 +50,18 @@ curl -H "Authorization: Bearer yourpassword" http://localhost:8000/status
   "current_track": {
     "title": "Song Title",
     "artist": "Artist Name",
-    "album": "Album Name"
+    "album": "Album Name",
+    "path": "Artist Name/Album Name/01 Song Title.mp3"
   },
+  "recent_tracks": [
+    {
+      "title": "Earlier Song",
+      "artist": "Artist Name",
+      "album": "Album Name",
+      "path": "Artist Name/Album Name/02 Earlier Song.mp3",
+      "played_at": "2026-03-04T10:26:00Z"
+    }
+  ],
   "uptime": "5h30m45s",
   "uptime_seconds": 19845,
   "playlist_length": 247
@@ -83,6 +93,9 @@ curl -H "Authorization: Bearer yourpassword" http://localhost:8000/status
   "uptime_seconds": 19845
 }
 ```
+
+`path` is relative to the station's library directory. It's omitted for files
+outside it (intro and ad tracks). `recent_tracks` holds up to 25 tracks, newest first.
 
 ## Statistics Endpoints
 
