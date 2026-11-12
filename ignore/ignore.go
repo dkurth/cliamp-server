@@ -11,7 +11,8 @@
 //	Artist/\[Live\] Song.mp3     backslash escapes * ? [ \ (and a leading #)
 //
 // The file is re-read whenever its modification time or size changes, so edits
-// take effect without restarting the server. A missing file means "ignore
+// take effect without restarting the server, and a track that becomes ignored
+// while it's playing is cut short (see Filter.Ignored and Hub.SetSkipCheck). A missing file means "ignore
 // nothing".
 package ignore
 
@@ -136,6 +137,14 @@ func (f *Filter) Next() library.Track {
 	}
 	slog.Warn("every track tried is ignored; playing one anyway", "path", t.Path)
 	return t
+}
+
+// Ignored reports whether the track at absolute path p is ignored right now
+// (re-reading the file first if it changed). The hub uses it to cut short a
+// track that was ignored while it was playing.
+func (f *Filter) Ignored(p string) bool {
+	rel, ok := Rel(f.root, p)
+	return ok && f.reload().Match(rel)
 }
 
 // reload re-reads the ignore file if it changed and returns the current rules.

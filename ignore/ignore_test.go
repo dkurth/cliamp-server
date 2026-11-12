@@ -98,6 +98,30 @@ func TestFilterSkipsAndReloads(t *testing.T) {
 	}
 }
 
+func TestIgnoredPicksUpChanges(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "lib")
+	file := filepath.Join(dir, "radio_ignore")
+	f := NewFilter(&seqSource{tracks: []library.Track{{Path: filepath.Join(root, "a.mp3")}}}, root, file, 1)
+	playing := filepath.Join(root, "Artist", "a.mp3")
+
+	if f.Ignored(playing) {
+		t.Fatal("no file: nothing should be ignored")
+	}
+	if err := os.WriteFile(file, []byte("Artist/a.mp3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !f.Ignored(playing) {
+		t.Fatal("expected the playing track to be ignored once it's in the file")
+	}
+	if f.Ignored(filepath.Join(root, "Artist", "b.mp3")) {
+		t.Fatal("other tracks should still play")
+	}
+	if f.Ignored(filepath.Join(dir, "ads", "ad.mp3")) {
+		t.Fatal("tracks outside the library (ads) are never ignored")
+	}
+}
+
 func TestRel(t *testing.T) {
 	if r, ok := Rel("/m/lib", "/m/lib/A/b.mp3"); !ok || r != "A/b.mp3" {
 		t.Errorf("got %q %v", r, ok)

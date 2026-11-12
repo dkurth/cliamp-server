@@ -103,8 +103,10 @@ func main() {
 		pl := playlist.New(tracks, stCfg.Shuffle)
 
 		var music playlist.TrackSource = pl
+		var filter *ignore.Filter
 		if stCfg.IgnoreFile != "" {
-			music = ignore.NewFilter(pl, stCfg.Path, stCfg.IgnoreFile, pl.Len())
+			filter = ignore.NewFilter(pl, stCfg.Path, stCfg.IgnoreFile, pl.Len())
+			music = filter
 			slog.Info("ignore file enabled", "station", id, "path", stCfg.IgnoreFile)
 		}
 
@@ -126,6 +128,10 @@ func main() {
 		}
 
 		hub := broadcast.NewHub(id, source, cfg.Stream.BufferSize, cfg.Stream.MaxListeners)
+		if filter != nil {
+			// Ignoring the track that's playing skips it right away.
+			hub.SetSkipCheck(filter.Ignored)
+		}
 
 		go hub.Run(ctx)
 

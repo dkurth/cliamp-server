@@ -34,6 +34,13 @@ type RecentTrack struct {
 
 const maxRecentTracks = 25
 
+// SkipCheck reports whether the track at path should stop playing right
+// away, e.g. because it was added to the ignore file while it was playing.
+type SkipCheck func(path string) bool
+
+// skipCheckEvery is how often the playing track is checked against SkipCheck.
+const skipCheckEvery = time.Second
+
 // DisconnectHook is called after a listener is removed from the hub.
 // It receives the station ID and a snapshot of the disconnected listener.
 type DisconnectHook func(stationID string, snap ListenerSnapshot, disconnectedAt time.Time)
@@ -51,6 +58,7 @@ type Hub struct {
 	disconnectHook DisconnectHook
 
 	stationID     string
+	skipCheck     SkipCheck    // optional; set before Run
 	currentTrack  atomic.Value // stores TrackInfo
 	listenerCount atomic.Int64
 
@@ -80,6 +88,13 @@ func (h *Hub) SetDisconnectHook(hook DisconnectHook) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.disconnectHook = hook
+}
+
+// SetSkipCheck registers a check run about once a second while a track
+// plays; when it returns true the track ends early and the next one starts.
+// Call it before Run.
+func (h *Hub) SetSkipCheck(fn SkipCheck) {
+	h.skipCheck = fn
 }
 
 // preparedTrack holds a track whose reader is already open and buffering.
@@ -176,6 +191,7 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 		epoch        = time.Now()
 		totalSamples int64
 		sampleRate   int
+		lastCheck    = epoch
 	)
 
 	// Reusable timer avoids per-frame allocation leak from time.After.
@@ -188,6 +204,14 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+
+		if h.skipCheck != nil && time.Since(lastCheck) >= skipCheckEvery {
+			lastCheck = time.Now()
+			if h.skipCheck(pt.track.Path) {
+				slog.Info("playing track is now ignored; skipping it", "path", pt.track.Path)
+				return
+			}
 		}
 
 		frame, err := reader.ReadFrame()
