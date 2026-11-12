@@ -70,6 +70,7 @@ func New(cfg *config.Config, stations map[string]*Station, geoDB *geo.DB, statsD
 			Password:    cfg.Admin.Password,
 			TrackCount:  st.TrackCount,
 			StationName: st.Config.Name,
+			LibraryRoot: st.Config.Path,
 		})
 
 		if statsDB != nil {
@@ -92,9 +93,10 @@ func New(cfg *config.Config, stations map[string]*Station, geoDB *geo.DB, statsD
 	stationInfos := make(map[string]*handler.StationInfo, len(stations))
 	for id, st := range stations {
 		stationInfos[id] = &handler.StationInfo{
-			Hub:        st.Hub,
-			Name:       st.Config.Name,
-			TrackCount: st.TrackCount,
+			Hub:         st.Hub,
+			Name:        st.Config.Name,
+			TrackCount:  st.TrackCount,
+			LibraryRoot: st.Config.Path,
 		}
 	}
 

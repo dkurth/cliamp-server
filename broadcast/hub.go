@@ -23,6 +23,7 @@ type TrackInfo struct {
 	Title  string
 	Artist string
 	Album  string
+	Path   string // absolute file path
 }
 
 // RecentTrack holds a track that was played and when it started.
@@ -162,6 +163,7 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 		Title:  pt.track.Title,
 		Artist: pt.track.Artist,
 		Album:  pt.track.Album,
+		Path:   pt.track.Path,
 	})
 
 	reader, err := mp3frame.NewReader(pt.src)

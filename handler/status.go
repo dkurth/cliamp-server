@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cliamp-server/broadcast"
+	"cliamp-server/ignore"
 )
 
 // Status handles GET /{station}/status — JSON per-station status.
@@ -17,30 +18,33 @@ type Status struct {
 	Password    string
 	TrackCount  int
 	StationName string
+	LibraryRoot string // used to report track paths relative to the library
 }
 
 type recentTrackResponse struct {
 	Title    string `json:"title"`
 	Artist   string `json:"artist"`
 	Album    string `json:"album"`
+	Path     string `json:"path,omitempty"` // relative to the library root
 	PlayedAt string `json:"played_at"`
 }
 
 type statusResponse struct {
-	Station         string                 `json:"station"`
-	Listeners       int                    `json:"listeners"`
-	ListenerDetails []listenerDetail       `json:"listener_details"`
-	CurrentTrack    currentTrack           `json:"current_track"`
-	RecentTracks    []recentTrackResponse  `json:"recent_tracks"`
-	Uptime          string                 `json:"uptime"`
-	UptimeSeconds   int64                  `json:"uptime_seconds"`
-	PlaylistLength  int                    `json:"playlist_length"`
+	Station         string                `json:"station"`
+	Listeners       int                   `json:"listeners"`
+	ListenerDetails []listenerDetail      `json:"listener_details"`
+	CurrentTrack    currentTrack          `json:"current_track"`
+	RecentTracks    []recentTrackResponse `json:"recent_tracks"`
+	Uptime          string                `json:"uptime"`
+	UptimeSeconds   int64                 `json:"uptime_seconds"`
+	PlaylistLength  int                   `json:"playlist_length"`
 }
 
 type currentTrack struct {
 	Title  string `json:"title"`
 	Artist string `json:"artist"`
 	Album  string `json:"album"`
+	Path   string `json:"path,omitempty"` // relative to the library root
 }
 
 type listenerDetail struct {
@@ -75,8 +79,9 @@ func (s *Status) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Title:  track.Title,
 			Artist: track.Artist,
 			Album:  track.Album,
+			Path:   relPath(s.LibraryRoot, track.Path),
 		},
-		RecentTracks:   buildRecentTracks(s.Hub.RecentTracks()),
+		RecentTracks:   buildRecentTracks(s.Hub.RecentTracks(), s.LibraryRoot),
 		Uptime:         formatDuration(uptime),
 		UptimeSeconds:  int64(uptime.Seconds()),
 		PlaylistLength: s.TrackCount,
@@ -88,9 +93,10 @@ func (s *Status) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // StationInfo holds the data needed for global status aggregation.
 type StationInfo struct {
-	Hub        *broadcast.Hub
-	Name       string
-	TrackCount int
+	Hub         *broadcast.Hub
+	Name        string
+	TrackCount  int
+	LibraryRoot string
 }
 
 // GlobalStatus handles GET /status — aggregated status for all stations.
@@ -143,8 +149,9 @@ func (g *GlobalStatus) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Title:  track.Title,
 				Artist: track.Artist,
 				Album:  track.Album,
+				Path:   relPath(info.LibraryRoot, track.Path),
 			},
-			RecentTracks:   buildRecentTracks(info.Hub.RecentTracks()),
+			RecentTracks:   buildRecentTracks(info.Hub.RecentTracks(), info.LibraryRoot),
 			PlaylistLength: info.TrackCount,
 		}
 	}
@@ -160,13 +167,24 @@ func (g *GlobalStatus) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func buildRecentTracks(tracks []broadcast.RecentTrack) []recentTrackResponse {
+// relPath reports p relative to the library root, or "" if it isn't inside
+// it (intro and ad files) or no root is known.
+func relPath(root, p string) string {
+	rel, ok := ignore.Rel(root, p)
+	if !ok {
+		return ""
+	}
+	return rel
+}
+
+func buildRecentTracks(tracks []broadcast.RecentTrack, root string) []recentTrackResponse {
 	out := make([]recentTrackResponse, len(tracks))
 	for i, t := range tracks {
 		out[i] = recentTrackResponse{
 			Title:    t.Title,
 			Artist:   t.Artist,
 			Album:    t.Album,
+			Path:     relPath(root, t.Path),
 			PlayedAt: t.PlayedAt.UTC().Format(time.RFC3339),
 		}
 	}
