@@ -1,6 +1,7 @@
 package ignore
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,6 +120,60 @@ func TestIgnoredPicksUpChanges(t *testing.T) {
 	}
 	if f.Ignored(filepath.Join(dir, "ads", "ad.mp3")) {
 		t.Fatal("tracks outside the library (ads) are never ignored")
+	}
+}
+
+func TestWatchReportsChanges(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "lib")
+	file := filepath.Join(dir, "radio_ignore")
+	f := NewFilter(&seqSource{tracks: []library.Track{{Path: filepath.Join(root, "a.mp3")}}}, root, file, 1)
+	playing := filepath.Join(root, "a.mp3")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	changed := make(chan bool, 10)
+	go f.Watch(ctx, func() { changed <- f.Ignored(playing) })
+	time.Sleep(100 * time.Millisecond) // let the watch start
+
+	wait := func(what string) bool {
+		select {
+		case v := <-changed:
+			return v
+		case <-time.After(3 * time.Second):
+			t.Fatalf("no change reported after %s", what)
+			return false
+		}
+	}
+
+	// Replaced with a rename, the way radio-app saves it.
+	tmp := filepath.Join(dir, ".radio_ignore-tmp")
+	if err := os.WriteFile(tmp, []byte("a.mp3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, file); err != nil {
+		t.Fatal(err)
+	}
+	if !wait("rename") {
+		t.Fatal("expected a.mp3 to be ignored after the rename")
+	}
+
+	// Edited in place.
+	if err := os.WriteFile(file, []byte("# nothing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if wait("write") {
+		t.Fatal("expected a.mp3 to play again after the edit")
+	}
+
+	// Other files in the folder don't count.
+	if err := os.WriteFile(filepath.Join(dir, "other"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-changed:
+		t.Fatal("a change to another file was reported")
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 

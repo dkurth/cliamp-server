@@ -11,13 +11,15 @@
 //	Artist/\[Live\] Song.mp3     backslash escapes * ? [ \ (and a leading #)
 //
 // The file is re-read whenever its modification time or size changes, so edits
-// take effect without restarting the server, and a track that becomes ignored
-// while it's playing is cut short (see Filter.Ignored and Hub.SetSkipCheck). A missing file means "ignore
+// take effect without restarting the server. Filter.Watch also has the OS
+// report changes as they happen, so a track that becomes ignored while it's
+// playing can be cut short (main.go wires it to Hub.SkipCurrentIf). A missing file means "ignore
 // nothing".
 package ignore
 
 import (
 	"bufio"
+	"context"
 	"log/slog"
 	"os"
 	"path"
@@ -28,6 +30,8 @@ import (
 
 	"cliamp-server/library"
 	"cliamp-server/playlist"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // Rules is a parsed ignore file.
@@ -140,11 +144,58 @@ func (f *Filter) Next() library.Track {
 }
 
 // Ignored reports whether the track at absolute path p is ignored right now
-// (re-reading the file first if it changed). The hub uses it to cut short a
-// track that was ignored while it was playing.
+// (re-reading the file first if it changed).
 func (f *Filter) Ignored(p string) bool {
 	rel, ok := Rel(f.root, p)
 	return ok && f.reload().Match(rel)
+}
+
+// watchSettle is how long Watch waits for a burst of events (a save is often
+// create + write + rename) to end before re-reading the file.
+const watchSettle = 50 * time.Millisecond
+
+// Watch has the OS report changes to the ignore file and, after each one,
+// re-reads it and calls onChange. It watches the file's folder rather than
+// the file, because writers usually replace the file with a rename (radio-app
+// does). It blocks until ctx is done. If the folder can't be watched it logs
+// why and returns; the file is still re-read before every track, so only the
+// immediate reaction is lost.
+func (f *Filter) Watch(ctx context.Context, onChange func()) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Warn("cannot watch ignore file", "path", f.file, "error", err)
+		return
+	}
+	defer w.Close()
+	dir := filepath.Dir(f.file)
+	if err := w.Add(dir); err != nil {
+		slog.Warn("cannot watch ignore file's folder", "path", dir, "error", err)
+		return
+	}
+	name := filepath.Clean(f.file)
+	var settle <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-w.Events:
+			if !ok {
+				return
+			}
+			if filepath.Clean(ev.Name) == name {
+				settle = time.After(watchSettle)
+			}
+		case err, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+			slog.Warn("watching ignore file", "path", f.file, "error", err)
+		case <-settle:
+			settle = nil
+			f.reload()
+			onChange()
+		}
+	}
 }
 
 // reload re-reads the ignore file if it changed and returns the current rules.

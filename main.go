@@ -129,8 +129,8 @@ func main() {
 
 		hub := broadcast.NewHub(id, source, cfg.Stream.BufferSize, cfg.Stream.MaxListeners)
 		if filter != nil {
-			// Ignoring the track that's playing skips it right away.
-			hub.SetSkipCheck(filter.Ignored)
+			// Adding the playing track to the ignore file skips it right away.
+			go filter.Watch(ctx, func() { hub.SkipCurrentIf(filter.Ignored) })
 		}
 
 		go hub.Run(ctx)

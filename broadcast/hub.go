@@ -34,13 +34,6 @@ type RecentTrack struct {
 
 const maxRecentTracks = 25
 
-// SkipCheck reports whether the track at path should stop playing right
-// away, e.g. because it was added to the ignore file while it was playing.
-type SkipCheck func(path string) bool
-
-// skipCheckEvery is how often the playing track is checked against SkipCheck.
-const skipCheckEvery = time.Second
-
 // DisconnectHook is called after a listener is removed from the hub.
 // It receives the station ID and a snapshot of the disconnected listener.
 type DisconnectHook func(stationID string, snap ListenerSnapshot, disconnectedAt time.Time)
@@ -58,7 +51,7 @@ type Hub struct {
 	disconnectHook DisconnectHook
 
 	stationID     string
-	skipCheck     SkipCheck    // optional; set before Run
+	skip          chan string  // path of a track to end early (see SkipCurrentIf)
 	currentTrack  atomic.Value // stores TrackInfo
 	listenerCount atomic.Int64
 
@@ -78,6 +71,7 @@ func NewHub(stationID string, source playlist.TrackSource, bufferSizeKB, maxList
 		listeners:    make(map[int64]*Listener),
 		maxListeners: maxListeners,
 		stationID:    stationID,
+		skip:         make(chan string, 1),
 	}
 	h.currentTrack.Store(TrackInfo{})
 	return h
@@ -90,11 +84,29 @@ func (h *Hub) SetDisconnectHook(hook DisconnectHook) {
 	h.disconnectHook = hook
 }
 
-// SetSkipCheck registers a check run about once a second while a track
-// plays; when it returns true the track ends early and the next one starts.
-// Call it before Run.
-func (h *Hub) SetSkipCheck(fn SkipCheck) {
-	h.skipCheck = fn
+// SkipCurrentIf ends the playing track early, and starts the next one, if
+// pred reports true for its path (e.g. it was just added to the ignore file).
+// Safe to call from any goroutine.
+func (h *Hub) SkipCurrentIf(pred func(path string) bool) {
+	p := h.CurrentTrack().Path
+	if p == "" || !pred(p) {
+		return
+	}
+	select {
+	case h.skip <- p:
+	default: // a skip is already pending
+	}
+}
+
+// skipRequested reports whether SkipCurrentIf asked to end the track at path.
+// A request for a track that has already ended is dropped.
+func (h *Hub) skipRequested(path string) bool {
+	select {
+	case p := <-h.skip:
+		return p == path
+	default:
+		return false
+	}
 }
 
 // preparedTrack holds a track whose reader is already open and buffering.
@@ -191,7 +203,6 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 		epoch        = time.Now()
 		totalSamples int64
 		sampleRate   int
-		lastCheck    = epoch
 	)
 
 	// Reusable timer avoids per-frame allocation leak from time.After.
@@ -206,12 +217,9 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 			return
 		}
 
-		if h.skipCheck != nil && time.Since(lastCheck) >= skipCheckEvery {
-			lastCheck = time.Now()
-			if h.skipCheck(pt.track.Path) {
-				slog.Info("playing track is now ignored; skipping it", "path", pt.track.Path)
-				return
-			}
+		if h.skipRequested(pt.track.Path) {
+			slog.Info("skipping the playing track", "path", pt.track.Path)
+			return
 		}
 
 		frame, err := reader.ReadFrame()

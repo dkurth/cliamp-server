@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
+	github.com/fsnotify/fsnotify v1.8.0
 	github.com/ncruces/go-sqlite3 v0.30.5
 	github.com/oschwald/geoip2-golang v1.13.0
 )
