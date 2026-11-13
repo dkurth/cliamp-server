@@ -137,6 +137,7 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 
 	next := prepare()
+	skipped := false
 
 	for {
 		if ctx.Err() != nil {
@@ -160,7 +161,8 @@ func (h *Hub) Run(ctx context.Context) {
 		nextCh := make(chan preparedTrack, 1)
 		go func() { nextCh <- prepare() }()
 
-		h.streamTrack(ctx, current)
+		// After a skip, start the next track with a burst (see streamTrack).
+		skipped = h.streamTrack(ctx, current, skipped)
 
 		// Close the finished source in the background so the next track's
 		// first frame reaches the ring buffer without waiting for ffmpeg
@@ -172,8 +174,16 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-// streamTrack plays a single prepared track into the ring buffer at real-time speed.
-func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
+// streamTrack plays a single prepared track into the ring buffer at real-time
+// speed, and reports whether it ended early because of SkipCurrentIf.
+//
+// With burst set (the previous track was skipped), the first prerollFrames
+// frames go out at once instead of in real time, then real time resumes. A
+// listener who connects right after a skip gets its preroll from the start
+// of this track rather than the tail of the skipped one, so the web player
+// can reconnect immediately. The station ends up ~3 s further ahead; already
+// connected listeners just buffer those frames a little earlier.
+func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack, burst bool) (skipped bool) {
 	slog.Info("now playing", "title", pt.track.Title, "artist", pt.track.Artist, "path", pt.track.Path)
 
 	// Push previous track to recent list before updating current
@@ -196,14 +206,18 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 	reader, err := mp3frame.NewReader(pt.src)
 	if err != nil {
 		slog.Error("cannot create frame reader", "path", pt.track.Path, "error", err)
-		return
+		return false
 	}
 
 	var (
 		epoch        = time.Now()
 		totalSamples int64
 		sampleRate   int
+		burstLeft    int
 	)
+	if burst {
+		burstLeft = prerollFrames
+	}
 
 	// Reusable timer avoids per-frame allocation leak from time.After.
 	throttle := time.NewTimer(0)
@@ -214,18 +228,18 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 
 	for {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 
 		if h.skipRequested(pt.track.Path) {
 			slog.Info("skipping the playing track", "path", pt.track.Path)
-			return
+			return true
 		}
 
 		frame, err := reader.ReadFrame()
 		if err != nil {
 			slog.Debug("end of track", "path", pt.track.Path, "error", err)
-			return
+			return false
 		}
 
 		// Set stream properties from first frame
@@ -238,8 +252,19 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 		// Write frame to ring buffer
 		h.ring.Write(frame.Data)
 
-		// Throttle to real-time
 		totalSamples += int64(frame.Samples)
+
+		// Burst: no waiting until the preroll is full, then carry on in real
+		// time from wherever the clock is now.
+		if burstLeft > 0 {
+			burstLeft--
+			if burstLeft == 0 && sampleRate > 0 {
+				epoch = time.Now().Add(-time.Duration(float64(totalSamples) / float64(sampleRate) * float64(time.Second)))
+			}
+			continue
+		}
+
+		// Throttle to real-time
 		if sampleRate > 0 {
 			deadline := epoch.Add(time.Duration(float64(totalSamples) / float64(sampleRate) * float64(time.Second)))
 			if wait := time.Until(deadline); wait > 0 {
@@ -247,7 +272,7 @@ func (h *Hub) streamTrack(ctx context.Context, pt preparedTrack) {
 				select {
 				case <-throttle.C:
 				case <-ctx.Done():
-					return
+					return false
 				}
 			}
 		}
